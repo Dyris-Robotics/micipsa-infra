@@ -1,0 +1,59 @@
+x-ros-common: &ros-common
+  environment:
+    ROS_DOMAIN_ID: 0
+    RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+    CYCLONEDDS_URI: file://${DDS_INSTALL_DIR}/cyclonedds.xml
+  volumes:
+    - ${DDS_SOURCE_DIR}/cyclonedds.xml:${DDS_INSTALL_DIR}/cyclonedds.xml:ro
+  network_mode: host
+  restart: no
+
+services:
+
+  # ==========================================================
+  # Layer x — Simulation
+  # ==========================================================
+  gazebo:
+    <<: *ros-common
+    image: micipsa/simulation:jazzy-v1.0.0
+    build:
+      context: ..
+      additional_contexts:
+        micipsa: ${MICIPSA_REPO_ROOT:-/MICIPSA_REPO_ROOT-is-not-set}
+      dockerfile: docker/simulation/Dockerfile
+      target: deploy
+    container_name: gazebo
+    privileged: false
+
+    command: >-
+      bash -c "ros2 launch micipsa_bringup simulation.launch.py log_level:=${MICIPSA_LOG_LEVEL} headless:=${MICIPSA_HEADLESS_SIM} simulation_world_file:=${MICIPSA_SIMULATION_WORLD_FILE}"
+    healthcheck:
+      test: [ "CMD", "bash", "-c", "source /ros2_ws/install/setup.bash && ros2 topic info /controller_manager/activity --no-daemon" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 3s
+
+  # ==========================================================
+  # Layer 4 — Actuation
+  # ==========================================================  
+  actuation:
+    depends_on:
+      gazebo:
+        condition: service_healthy
+      description:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "bash", "-c", "exit 0" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  # ==========================================================
+  # Layer 8 — Perception
+  # ==========================================================
+  perception:
+    depends_on:
+      gazebo:
+        condition: service_healthy

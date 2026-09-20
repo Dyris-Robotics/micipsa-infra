@@ -1,0 +1,7 @@
+[Unit]
+Description=Micipsa Hardware Layer
+Requires=micipsa-hardware.service
+After=micipsa-hardware.service
+
+[Install]
+WantedBy=multi-user.target

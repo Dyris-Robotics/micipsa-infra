@@ -1,0 +1,26 @@
+# /etc/udev/rules.d/99-micipsa-cameras.rules
+# RealSense D435i — Interface 00 (depth/infra)
+SUBSYSTEM=="video4linux", ATTRS{idVendor}=="8086", ATTRS{idProduct}=="0b3a", \
+  ATTRS{serial}=="903223053269", ENV{ID_USB_INTERFACE_NUM}=="00", ATTR{index}=="0", \
+  SYMLINK+="micipsa/realsense_depth0", MODE="0666", GROUP="plugdev"
+
+SUBSYSTEM=="video4linux", ATTRS{idVendor}=="8086", ATTRS{idProduct}=="0b3a", \
+  ATTRS{serial}=="903223053269", ENV{ID_USB_INTERFACE_NUM}=="00", ATTR{index}=="1", \
+  SYMLINK+="micipsa/realsense_depth1", MODE="0666", GROUP="plugdev"
+
+SUBSYSTEM=="video4linux", ATTRS{idVendor}=="8086", ATTRS{idProduct}=="0b3a", \
+  ATTRS{serial}=="903223053269", ENV{ID_USB_INTERFACE_NUM}=="00", ATTR{index}=="2", \
+  SYMLINK+="micipsa/realsense_depth2", MODE="0666", GROUP="plugdev"
+
+SUBSYSTEM=="video4linux", ATTRS{idVendor}=="8086", ATTRS{idProduct}=="0b3a", \
+  ATTRS{serial}=="903223053269", ENV{ID_USB_INTERFACE_NUM}=="00", ATTR{index}=="3", \
+  SYMLINK+="micipsa/realsense_depth3", MODE="0666", GROUP="plugdev"
+
+# RealSense D435i — Interface 03 (RGB color)
+SUBSYSTEM=="video4linux", ATTRS{idVendor}=="8086", ATTRS{idProduct}=="0b3a", \
+  ATTRS{serial}=="903223053269", ENV{ID_USB_INTERFACE_NUM}=="03", ATTR{index}=="0", \
+  SYMLINK+="micipsa/realsense_color0", MODE="0666", GROUP="plugdev"
+
+SUBSYSTEM=="video4linux", ATTRS{idVendor}=="8086", ATTRS{idProduct}=="0b3a", \
+  ATTRS{serial}=="903223053269", ENV{ID_USB_INTERFACE_NUM}=="03", ATTR{index}=="1", \
+  SYMLINK+="micipsa/realsense_color1", MODE="0666", GROUP="plugdev"

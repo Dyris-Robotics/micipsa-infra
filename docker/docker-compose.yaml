@@ -1,0 +1,265 @@
+x-ros-common: &ros-common
+  environment:
+    ROS_DOMAIN_ID: 0
+    RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+    CYCLONEDDS_URI: file://${DDS_INSTALL_DIR}/cyclonedds.xml
+  volumes:
+    - ${DDS_SOURCE_DIR}/cyclonedds.xml:${DDS_INSTALL_DIR}/cyclonedds.xml:ro
+  network_mode: host
+  restart: no
+
+configs:
+  actuation_config:
+    file: ${BRINGUP_CONFIG_SRC}/actuation/${MICIPSA_ROS2_CONTROL_CONTROLLERS_CONFIG_FILE}
+  twist_mux_config:
+    file: ${BRINGUP_CONFIG_SRC}/actuation/${MICIPSA_TWIST_MUX_CONFIG_FILE}
+  ekf_config:
+    file: ${BRINGUP_CONFIG_SRC}/localization/${MICIPSA_EKF_CONFIG_FILE}
+  slam_toolbox_config:
+    file: ${BRINGUP_CONFIG_SRC}/slam/${MICIPSA_SLAM_TOOLBOX_CONFIG_FILE}
+  nav2_config:
+    file: ${BRINGUP_CONFIG_SRC}/navigation/${MICIPSA_NAV2_CONFIG_FILE}
+  pointcloud_config_file:
+    file: ${BRINGUP_CONFIG_SRC}/perception/${MICIPSA_POINTCLOUD_CONFIG_FILE}
+  apriltags_config_file:
+    file: ${BRINGUP_CONFIG_SRC}/perception/${MICIPSA_APRILTAGS_CONFIG_FILE}
+  behavior_config_file:
+    file: ${BRINGUP_CONFIG_SRC}/behavior/${MICIPSA_BEHAVIOR_CONFIG_FILE}
+
+services:
+
+  # ==========================================================
+  # Layer 3 — Description
+  # ==========================================================
+  description:
+    <<: *ros-common
+    image: micipsa/description:jazzy-v1.0.0
+    build:
+      context: ..
+      additional_contexts:
+        micipsa: ${MICIPSA_REPO_ROOT:-/MICIPSA_REPO_ROOT-is-not-set}
+      dockerfile: docker/description/Dockerfile
+      target: deploy
+    container_name: micipsa_description
+    privileged: false
+
+    command: >-
+      bash -c "ros2 launch micipsa_bringup description.launch.py deploy_mode:=${MICIPSA_DEPLOY_MODE} use_sim_time:=${MICIPSA_USE_SIM_TIME} log_level:=${MICIPSA_LOG_LEVEL} devices_config_file:=${MICIPSA_DEVICES_CONFIG_FILE} controllers_config_file:=${MICIPSA_ROS2_CONTROL_CONTROLLERS_CONFIG_FILE}"
+
+    healthcheck:
+      test: [ "CMD", "bash", "-c", "pgrep -f robot_state_publisher > /dev/null" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ==========================================================
+  # Layer 4 — Actuation
+  # ==========================================================
+  actuation:
+    <<: *ros-common
+    image: micipsa/actuation:jazzy-v1.0.0
+    build:
+      context: ..
+      additional_contexts:
+        micipsa: ${MICIPSA_REPO_ROOT:-/MICIPSA_REPO_ROOT-is-not-set}
+      dockerfile: docker/actuation/Dockerfile
+      target: deploy
+    container_name: micipsa_actuation
+    privileged: false
+    depends_on:
+      description:
+        condition: service_healthy
+
+    configs:
+      - source: actuation_config
+        target: ${BRINGUP_CONFIG_INSTALL_DIR}/actuation/${MICIPSA_ROS2_CONTROL_CONTROLLERS_CONFIG_FILE}
+      - source: twist_mux_config
+        target: ${BRINGUP_CONFIG_INSTALL_DIR}/actuation/${MICIPSA_TWIST_MUX_CONFIG_FILE}
+
+    command: >-
+      bash -c "ros2 launch micipsa_bringup actuation.launch.py deploy_mode:=${MICIPSA_DEPLOY_MODE} use_sim_time:=${MICIPSA_USE_SIM_TIME} log_level:=${MICIPSA_LOG_LEVEL} ros2_control_controllers_config_file:=${MICIPSA_ROS2_CONTROL_CONTROLLERS_CONFIG_FILE} twist_mux_config_file:=${MICIPSA_TWIST_MUX_CONFIG_FILE}"
+
+    healthcheck:
+      test: [ "CMD", "bash", "-c", "pgrep -f controller_manager > /dev/null" ]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ==========================================================
+  # Layer 5 — Localization
+  # ==========================================================
+  localization:
+    <<: *ros-common
+    image: micipsa/localization:jazzy-v1.0.0
+    build:
+      context: ..
+      additional_contexts:
+        micipsa: ${MICIPSA_REPO_ROOT:-/MICIPSA_REPO_ROOT-is-not-set}
+      dockerfile: docker/localization/Dockerfile
+      target: deploy
+    container_name: micipsa_localization
+    privileged: false
+    depends_on:
+      actuation:
+        condition: service_healthy
+
+    configs:
+      - source: ekf_config
+        target: ${BRINGUP_CONFIG_INSTALL_DIR}/localization/${MICIPSA_EKF_CONFIG_FILE}
+
+    command: >-
+      bash -c "ros2 launch micipsa_bringup localization.launch.py deploy_mode:=${MICIPSA_DEPLOY_MODE} use_sim_time:=${MICIPSA_USE_SIM_TIME} log_level:=${MICIPSA_LOG_LEVEL} ekf_config_file:=${MICIPSA_EKF_CONFIG_FILE}"
+
+    healthcheck:
+      test: [ "CMD", "bash", "-c", "pgrep -f ekf_filter_node > /dev/null" ]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ==========================================================
+  # Layer 6 — SLAM
+  # ==========================================================
+  slam:
+    <<: *ros-common
+    profiles: [ "mapping" ]
+    image: micipsa/slam:jazzy-v1.0.0
+    build:
+      context: ..
+      additional_contexts:
+        micipsa: ${MICIPSA_REPO_ROOT:-/MICIPSA_REPO_ROOT-is-not-set}
+      dockerfile: docker/slam/Dockerfile
+      target: deploy
+    container_name: micipsa_slam
+    privileged: false
+    depends_on:
+      localization:
+        condition: service_healthy
+
+    configs:
+      - source: slam_toolbox_config
+        target: ${BRINGUP_CONFIG_INSTALL_DIR}/slam/${MICIPSA_SLAM_TOOLBOX_CONFIG_FILE}
+
+    volumes:
+      - ${DDS_SOURCE_DIR}/cyclonedds.xml:${DDS_INSTALL_DIR}/cyclonedds.xml:ro
+      - ${MAPS_SOURCE_DIR:-/tmp}:${MAPS_SOURCE_DIR:-/tmp}:rw
+
+    command: >-
+      bash -c "ros2 launch micipsa_bringup slam.launch.py use_sim_time:=${MICIPSA_USE_SIM_TIME} log_level:=${MICIPSA_LOG_LEVEL} slam_toolbox_config_file:=${MICIPSA_SLAM_TOOLBOX_CONFIG_FILE} map_saver_config_file:=${MICIPSA_MAP_SAVER_CONFIG_FILE}"
+
+    healthcheck:
+      test: [ "CMD", "bash", "-c", "pgrep -f slam_toolbox > /dev/null" ]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ==========================================================
+  # Layer 7 — Navigation
+  # ==========================================================
+  navigation:
+    <<: *ros-common
+    profiles: [ "localization" ]
+    image: micipsa/navigation:jazzy-v1.0.0
+    build:
+      context: ..
+      additional_contexts:
+        micipsa: ${MICIPSA_REPO_ROOT:-/MICIPSA_REPO_ROOT-is-not-set}
+      dockerfile: docker/navigation/Dockerfile
+      target: deploy
+    container_name: micipsa_navigation
+    privileged: false
+    depends_on:
+      localization:
+        condition: service_healthy
+
+    configs:
+      - source: nav2_config
+        target: ${BRINGUP_CONFIG_INSTALL_DIR}/navigation/${MICIPSA_NAV2_CONFIG_FILE}
+
+    volumes:
+      - ${DDS_SOURCE_DIR}/cyclonedds.xml:${DDS_INSTALL_DIR}/cyclonedds.xml:ro
+      - ${MAPS_SOURCE_DIR:-/tmp}:${MAPS_INSTALL_DIR:-/tmp}:ro
+
+    command: >-
+      bash -c "ros2 launch micipsa_bringup navigation.launch.py use_sim_time:=${MICIPSA_USE_SIM_TIME} log_level:=${MICIPSA_LOG_LEVEL} nav2_config_file:=${MICIPSA_NAV2_CONFIG_FILE} map_file:=${MICIPSA_MAP_FILE}"
+
+    healthcheck:
+      test: [ "CMD", "bash", "-c", "pgrep -f bt_navigator > /dev/null" ]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ==========================================================
+  # Layer 8 — Perception
+  # ==========================================================
+  perception:
+    <<: *ros-common
+    profiles: [ "perception" ]
+    image: micipsa/perception:jazzy-v1.0.0
+    build:
+      context: ..
+      additional_contexts:
+        micipsa: ${MICIPSA_REPO_ROOT:-/MICIPSA_REPO_ROOT-is-not-set}
+      dockerfile: docker/perception/Dockerfile
+      target: deploy
+    container_name: micipsa_perception
+    privileged: false
+
+    configs:
+      - source: pointcloud_config_file
+        target: ${BRINGUP_CONFIG_INSTALL_DIR}/perception/${MICIPSA_POINTCLOUD_CONFIG_FILE}
+      - source: apriltags_config_file
+        target: ${BRINGUP_CONFIG_INSTALL_DIR}/perception/${MICIPSA_APRILTAGS_CONFIG_FILE}
+
+    volumes:
+      - ${DDS_SOURCE_DIR}/cyclonedds.xml:${DDS_INSTALL_DIR}/cyclonedds.xml:ro
+
+    command: >-
+      bash -c "ros2 launch micipsa_bringup perception.launch.py use_sim_time:=${MICIPSA_USE_SIM_TIME} log_level:=${MICIPSA_LOG_LEVEL} pointcloud_config_file:=${MICIPSA_POINTCLOUD_CONFIG_FILE} apriltags_config_file:=${MICIPSA_APRILTAGS_CONFIG_FILE}"
+
+    healthcheck:
+      test: [ "CMD", "bash", "-c", "pgrep -f pointcloud_node > /dev/null" ]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ==========================================================
+  # Layer 9 — Behavior
+  # ==========================================================
+  behavior:
+    <<: *ros-common
+    profiles: [ "behavior" ]
+    image: micipsa/behavior:jazzy-v1.0.0
+    build:
+      context: ..
+      additional_contexts:
+        micipsa: ${MICIPSA_REPO_ROOT:-/MICIPSA_REPO_ROOT-is-not-set}
+      dockerfile: docker/behavior/Dockerfile
+      target: deploy
+    container_name: micipsa_behavior
+    privileged: false
+    depends_on:
+      navigation:
+        condition: service_healthy
+
+    configs:
+      - source: behavior_config_file
+        target: ${BRINGUP_CONFIG_INSTALL_DIR}/behavior/${MICIPSA_BEHAVIOR_CONFIG_FILE}
+
+    volumes:
+      - ${DDS_SOURCE_DIR}/cyclonedds.xml:${DDS_INSTALL_DIR}/cyclonedds.xml:ro
+
+    command: >-
+      bash -c "ros2 launch micipsa_bringup behavior.launch.py use_sim_time:=${MICIPSA_USE_SIM_TIME} log_level:=${MICIPSA_LOG_LEVEL} behavior_config_file:=${MICIPSA_BEHAVIOR_CONFIG_FILE}"
+
+    healthcheck:
+      test: [ "CMD", "bash", "-c", "pgrep -f behavior_node > /dev/null" ]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s

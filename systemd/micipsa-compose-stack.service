@@ -1,0 +1,44 @@
+[Unit]
+Description=Micipsa Docker Compose Stack
+Documentation=https://github.com/Dyris-Robotics/micipsa-infra
+
+After=micipsa-hardware.target
+Requires=micipsa-hardware.target
+
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+# Lets compose_launcher find the utils library installed next to it
+Environment=PYTHONPATH=/usr/local/lib/micipsa
+
+# Force-clear any leftover state from an unclean shutdown before bringing
+# the stack up. The leading "-" tells systemd not to fail the unit if this
+# step itself errors (e.g. nothing was running, or a container was already
+# gone) it's cleanup, not a hard precondition.
+ExecStartPre=-/usr/local/bin/compose_launcher down \
+    --docker-compose-files-dir /etc/micipsa/infra/docker/
+
+ExecStart=/usr/local/bin/compose_launcher up \
+    --mode deploy \
+    --bringup-config-dir /etc/micipsa/micipsa_robot/micipsa_bringup/config/ \
+    --maps-dir /etc/micipsa/micipsa_robot/micipsa_maps/maps/ \
+    --dds-dir /etc/micipsa/infra/dds/ \
+    --bringup-config-name bringup_config.yaml \
+    --docker-compose-files-dir /etc/micipsa/infra/docker/
+
+ExecStop=/usr/local/bin/compose_launcher down \
+    --docker-compose-files-dir /etc/micipsa/infra/docker/
+
+Restart=on-failure
+RestartSec=10s
+TimeoutStartSec=120s
+TimeoutStopSec=120s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=micipsa-docker
+
+[Install]
+WantedBy=multi-user.target

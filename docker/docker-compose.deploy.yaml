@@ -1,0 +1,102 @@
+x-ros-common: &ros-common
+  environment:
+    ROS_DOMAIN_ID: 0
+    RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+    CYCLONEDDS_URI: file://${DDS_INSTALL_DIR}/cyclonedds.xml
+  volumes:
+    - ${DDS_SOURCE_DIR}/cyclonedds.xml:${DDS_INSTALL_DIR}/cyclonedds.xml:ro
+  network_mode: host
+  restart: no
+
+configs:
+  front_camera_config:
+    file: ${BRINGUP_CONFIG_SRC}/drivers/${MICIPSA_FRONT_CAMERA_CONFIG_FILE}
+  base_lidar_config:
+    file: ${BRINGUP_CONFIG_SRC}/drivers/${MICIPSA_BASE_LIDAR_CONFIG_FILE}
+
+services:
+
+  # ==========================================================
+  # Layer 2 — Drivers
+  # ==========================================================
+  front_camera_driver:
+    <<: *ros-common
+    image: micipsa/drivers:jazzy-v1.0.0
+    build:
+      context: ..
+      additional_contexts:
+        micipsa: ${MICIPSA_REPO_ROOT:-/MICIPSA_REPO_ROOT-is-not-set}
+      dockerfile: docker/drivers/Dockerfile
+      target: deploy
+    container_name: front_camera_driver
+    privileged: false
+
+    configs:
+      - source: front_camera_config
+        target: ${BRINGUP_CONFIG_INSTALL_DIR}/drivers/${MICIPSA_FRONT_CAMERA_CONFIG_FILE}
+    devices:
+      - ${MICIPSA_FRONT_CAMERA_PORTS_DEPTH_0}:/dev/video0
+      - ${MICIPSA_FRONT_CAMERA_PORTS_DEPTH_1}:/dev/video1
+      - ${MICIPSA_FRONT_CAMERA_PORTS_DEPTH_2}:/dev/video2
+      - ${MICIPSA_FRONT_CAMERA_PORTS_DEPTH_3}:/dev/video3
+      - ${MICIPSA_FRONT_CAMERA_PORTS_COLOR_0}:/dev/video4
+      - ${MICIPSA_FRONT_CAMERA_PORTS_COLOR_1}:/dev/video5
+    command: >-
+      bash -c "ros2 launch micipsa_bringup camera.launch.py log_level:=${MICIPSA_LOG_LEVEL} device_name:=${MICIPSA_FRONT_CAMERA_DEVICE_NAME} camera_config_file:=${MICIPSA_FRONT_CAMERA_CONFIG_FILE}"
+
+    healthcheck:
+      test: [ "CMD", "bash", "-c", "pgrep -f front_camera > /dev/null" ]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  base_lidar_driver:
+    <<: *ros-common
+    image: micipsa/drivers:jazzy-v1.0.0
+    build:
+      context: ..
+      additional_contexts:
+        micipsa: ${MICIPSA_REPO_ROOT:-/MICIPSA_REPO_ROOT-is-not-set}
+      dockerfile: docker/drivers/Dockerfile
+      target: deploy
+    container_name: base_lidar_driver
+    privileged: false
+
+    configs:
+      - source: base_lidar_config
+        target: ${BRINGUP_CONFIG_INSTALL_DIR}/drivers/${MICIPSA_BASE_LIDAR_CONFIG_FILE}
+    devices:
+      - ${MICIPSA_BASE_LIDAR_PORT}:${MICIPSA_BASE_LIDAR_PORT}
+    command: >-
+      bash -c "ros2 launch micipsa_bringup lidar.launch.py log_level:=${MICIPSA_LOG_LEVEL} device_name:=${MICIPSA_BASE_LIDAR_DEVICE_NAME} lidar_config_file:=${MICIPSA_BASE_LIDAR_CONFIG_FILE}"
+
+    healthcheck:
+      test: [ "CMD", "bash", "-c", "pgrep -f ydlidar_ros2_driver_node > /dev/null" ]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ==========================================================
+  # Layer 4 — Actuation
+  # ==========================================================  
+  actuation:
+    devices:
+      - ${MICIPSA_STM_BOARD_PORT}:${MICIPSA_STM_BOARD_PORT}
+
+  # ==========================================================
+  # Layer 6 — SLAM
+  # ==========================================================
+  slam:
+    depends_on:
+      base_lidar_driver:
+        condition: service_healthy
+
+  # ==========================================================
+  # Layer 8 — Perception
+  # ==========================================================
+  perception:
+    depends_on:
+      front_camera_driver:
+        condition: service_healthy
