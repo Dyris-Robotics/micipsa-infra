@@ -3,8 +3,17 @@ x-ros-common: &ros-common
     ROS_DOMAIN_ID: 0
     RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
     CYCLONEDDS_URI: file://${DDS_INSTALL_DIR}/cyclonedds.xml
+    DISPLAY: ${DISPLAY:?DISPLAY not set}
+    QT_X11_NO_MITSHM: 1
+    XDG_RUNTIME_DIR: /tmp/runtime-micipsa
   volumes:
     - ${DDS_SOURCE_DIR}/cyclonedds.xml:${DDS_INSTALL_DIR}/cyclonedds.xml:ro
+    - /tmp/.X11-unix:/tmp/.X11-unix:rw
+  devices:
+    - /dev/dri:/dev/dri
+  group_add:
+    - "${VIDEO_GID:?VIDEO_GID not set, run through compose_launcher}"
+    - "${RENDER_GID:?RENDER_GID not set, run through compose_launcher}"
   network_mode: host
   restart: no
 

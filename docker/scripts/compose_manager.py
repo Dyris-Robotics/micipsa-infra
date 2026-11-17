@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import pwd
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -25,6 +27,8 @@ MAPS_INSTALL_DIR = Path("/ros2_ws/install/micipsa_maps/share/micipsa_maps/maps")
 DDS_INSTALL_DIR = Path("/etc/micipsa/infra/dds/")
 
 
+CONTAINER_UID = 1000  # must match USER_UID in docker/base/Dockerfile
+
 # =========================================================================
 #                             RUN FUNCTIONS
 # =========================================================================
@@ -45,6 +49,7 @@ def run_docker_command(cmd: list[str], env: dict[str, str] | None = None) -> Non
 # =====================
 def compose_up(
     mode: str,
+    repo_root: Path,
     bringup_config_name: str,
     docker_compose_files_dir: Path,
     bringup_config_dir: Path,
@@ -76,6 +81,8 @@ def compose_up(
         bringup_config_install_dir=BRINGUP_CONFIG_INSTALL_DIR,
         maps_install_dir=MAPS_INSTALL_DIR,
         dds_install_dir=DDS_INSTALL_DIR,
+        mode=mode,
+        repo_root=repo_root,
     )
 
     launch_command = construct_launch_command(env_vars, compose_files, extra_args)
@@ -96,6 +103,8 @@ def compose_up(
 
     # Execute Command
     if not dry_run:
+        if mode == "sim":
+            allow_container_x_access()
         run_docker_command(launch_command, env={**os.environ, **env_vars.merged()})
 
     print(ok("docker compose up completed successfully"))
@@ -115,7 +124,11 @@ def compose_down(docker_compose_files_dir: Path, extra_args: list[str]) -> None:
     print(banner("COMMAND"))
     print(item(command(cmd)))
 
-    run_docker_command(cmd)
+    # The sim overlay requires these at interpolation time, their values are irrelevant for `down`.
+    placeholders = {"DISPLAY": "unused", "VIDEO_GID": "0", "RENDER_GID": "0"}
+    env = {**placeholders, **os.environ}
+    
+    run_docker_command(cmd, env=env)
 
     print(ok("docker compose down completed successfully"))
 
@@ -200,6 +213,27 @@ def write_dotenv(env_vars: dict[str, str], docker_compose_files_dir: Path) -> No
         for key, value in env_vars.items():
             f.write(f"{key}={value}\n")
     
+def allow_container_x_access() -> None:
+    """
+    Allow the sim container's user to connect to the host X server (xhost).
+    DISPLAY is already validated by env_builder.build_sim_env_vars().
+    """
+    if shutil.which("xhost") is None:
+        raise RuntimeError(
+            "'xhost' not found: install the simulation host dependencies with: "
+            "sudo scripts/installers/install_simulation_deps.sh (from the micipsa-infra repo)"
+        )
+
+    try:
+        user = pwd.getpwuid(CONTAINER_UID).pw_name
+    except KeyError:
+        raise RuntimeError(f"No host user with UID {CONTAINER_UID}: cannot grant X access to the container")
+
+    result = subprocess.run(["xhost", f"+si:localuser:{user}"], capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"xhost failed: {result.stderr.strip()}")
+    print(ok(f"X access granted to local user '{user}' (UID {CONTAINER_UID})"))
+    
 # =========================================================================
 #                             PRINT FUNCTIONS
 # =========================================================================
@@ -238,6 +272,11 @@ def print_launch_summary(
             print(field(key, value, key_width=34))
     else:
         print(item("(none)"))
+
+    if env_vars.sim:
+        print(banner("Simulation GUI"))
+        for key, value in env_vars.sim.items():
+            print(field(key, value, key_width=34))
 
     print(banner("Bringup Config Containers Install Dir"))
     print(field("Bringup Config Install Dir", env_vars.compose["BRINGUP_CONFIG_INSTALL_DIR"]))
