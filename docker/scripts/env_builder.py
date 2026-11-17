@@ -26,6 +26,7 @@ def compose_env_vars(
     bringup_config_dir: Path, maps_dir: Path, dds_dir: Path, settings: dict,
     devices_data: dict,
     bringup_config_install_dir: Path, maps_install_dir: Path, dds_install_dir: Path,
+    repo_root: Path | None = None,
 ) -> EnvGroups:
 
     # Bringup Data
@@ -46,6 +47,10 @@ def compose_env_vars(
         "DDS_SOURCE_DIR": str(dds_dir),
         "DDS_INSTALL_DIR": str(dds_install_dir),
     }
+
+    # Main repo, used by compose build.additional_contexts (micipsa: ${MICIPSA_REPO_ROOT})
+    if repo_root is not None:
+        compose_env["MICIPSA_REPO_ROOT"] = str(repo_root)
 
     return EnvGroups(bringup=bringup_env, devices=devices_env, compose=compose_env)
 

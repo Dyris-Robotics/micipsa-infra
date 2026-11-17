@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -13,26 +14,52 @@ from compose_manager import compose_up, compose_down
 #                          DIRECTORIES PATHS
 # =========================================================================
 DOCKER_SCRIPTS_DIR = Path(__file__).resolve().parent
-REPO_ROOT = DOCKER_SCRIPTS_DIR.parent.parent.parent
 DEFAULT_DOCKER_COMPOSE_FILES_DIR = DOCKER_SCRIPTS_DIR.parent
-
-# Bringup Configs
-DEFAULT_BRINGUP_CONFIG_DIR = (
-    REPO_ROOT / "micipsa_robot" / "micipsa_bringup" / "config"
-).resolve()
-
-# Maps
-DEFAULT_MAPS_SOURCE_DIR = (
-    REPO_ROOT / "micipsa_robot" / "micipsa_maps" / "maps"
-).resolve()
 
 # Network
 DEFAULT_DDS_SOURCE_DIR = Path("/etc/micipsa/infra/dds/")
+
+# Paths inside the main micipsa repo (resolved at runtime from --repo-root / $MICIPSA_REPO_ROOT)
+BRINGUP_CONFIG_SUBDIR = Path("micipsa_robot") / "micipsa_bringup" / "config"
+MAPS_SUBDIR = Path("micipsa_robot") / "micipsa_maps" / "maps"
+
 
 # =========================================================================
 #                          DEFAULT FILES
 # =========================================================================
 DEFAULT_BRINGUP_CONFIG = "bringup_config.yaml"
+
+# =========================================================================
+#                          MICIPSA REPO
+# =========================================================================
+def find_repo_root(cli_value: Path | None) -> Path | None:
+    """Main micipsa repo location: --repo-root, else $MICIPSA_REPO_ROOT, else None."""
+    if cli_value is not None:
+        return cli_value.resolve()
+    env_value = os.environ.get("MICIPSA_REPO_ROOT")
+    return Path(env_value).resolve() if env_value else None
+    
+def resolve_repo_paths(args: argparse.Namespace) -> None:
+    """
+    Resolve args.repo_root (optional) and fill --bringup-config-dir / --maps-dir
+    from it when not given. The repo root is only *required* if one of them is
+    missing, so callers that pass both (e.g. the systemd unit) don't need it.
+    """
+    args.repo_root = find_repo_root(args.repo_root)
+
+    if args.bringup_config_dir is not None and args.maps_dir is not None:
+        return
+
+    if args.repo_root is None:
+        raise RuntimeError(
+            "Main micipsa repo location unknown: pass --repo-root or "
+            "export MICIPSA_REPO_ROOT=/path/to/micipsa"
+        )
+    if args.bringup_config_dir is None:
+        args.bringup_config_dir = args.repo_root / BRINGUP_CONFIG_SUBDIR
+    if args.maps_dir is None:
+        args.maps_dir = args.repo_root / MAPS_SUBDIR
+
 
 # =========================================================================
 #                           ARGS PARSER
@@ -68,18 +95,25 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help=f"Directory containing the docker-compose files (default: {DEFAULT_DOCKER_COMPOSE_FILES_DIR})",
     )
     parser.add_argument(
+        "--repo-root",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="Main micipsa repo location (default: $MICIPSA_REPO_ROOT)",
+    )
+    parser.add_argument(
         "--bringup-config-dir",
         type=Path,
-        default=DEFAULT_BRINGUP_CONFIG_DIR,
+        default=None,
         metavar="DIR",
-        help=f"Directory containing bringup config files (default: {DEFAULT_BRINGUP_CONFIG_DIR})",
+        help=f"Directory containing bringup config files (default: <repo-root>/{BRINGUP_CONFIG_SUBDIR})",
     )
     parser.add_argument(
         "--maps-dir",
         type=Path,
-        default=DEFAULT_MAPS_SOURCE_DIR,
+        default=None,
         metavar="DIR",
-        help=f"Directory containing maps files (default: {DEFAULT_MAPS_SOURCE_DIR})",
+        help=f"Directory containing maps files (default: <repo-root>/{MAPS_SUBDIR})",
     )
     parser.add_argument(
         "--dds-dir",
@@ -110,8 +144,10 @@ def main() -> int:
  
     try:
         if args.action == "up":
+            resolve_repo_paths(args)
             compose_up(
                 mode=args.mode,
+                repo_root=args.repo_root,
                 bringup_config_name=args.bringup_config_name,
                 docker_compose_files_dir=args.docker_compose_files_dir.resolve(),
                 bringup_config_dir=args.bringup_config_dir.resolve(),

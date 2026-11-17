@@ -45,6 +45,7 @@ def run_docker_command(cmd: list[str], env: dict[str, str] | None = None) -> Non
 # =====================
 def compose_up(
     mode: str,
+    repo_root: Path,
     bringup_config_name: str,
     docker_compose_files_dir: Path,
     bringup_config_dir: Path,
@@ -76,6 +77,7 @@ def compose_up(
         bringup_config_install_dir=BRINGUP_CONFIG_INSTALL_DIR,
         maps_install_dir=MAPS_INSTALL_DIR,
         dds_install_dir=DDS_INSTALL_DIR,
+        repo_root=repo_root,
     )
 
     launch_command = construct_launch_command(env_vars, compose_files, extra_args)
