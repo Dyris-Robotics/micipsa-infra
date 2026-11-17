@@ -16,8 +16,18 @@ from compose_manager import compose_up, compose_down
 DOCKER_SCRIPTS_DIR = Path(__file__).resolve().parent
 DEFAULT_DOCKER_COMPOSE_FILES_DIR = DOCKER_SCRIPTS_DIR.parent
 
-# Network
-DEFAULT_DDS_SOURCE_DIR = Path("/etc/micipsa/infra/dds/")
+INFRA_ROOT = DOCKER_SCRIPTS_DIR.parent.parent
+
+# Network: DDS configs live in the infra repo's dds/ when run from a checkout,
+# otherwise in the installed location (launcher installed outside the repo).
+# Each mode has its own cyclonedds.xml: deploy uses the robot's network,
+# sim binds to loopback since all containers run on the same host.
+REPO_DDS_SOURCE_DIR = INFRA_ROOT / "dds"
+INSTALLED_DDS_SOURCE_DIR = Path("/etc/micipsa/infra/dds/")
+DDS_MODE_SUBDIRS = {
+    "deploy": Path("."),
+    "sim": Path("sim"),
+}
 
 # Paths inside the main micipsa repo (resolved at runtime from --repo-root / $MICIPSA_REPO_ROOT)
 BRINGUP_CONFIG_SUBDIR = Path("micipsa_robot") / "micipsa_bringup" / "config"
@@ -59,6 +69,24 @@ def resolve_repo_paths(args: argparse.Namespace) -> None:
         args.bringup_config_dir = args.repo_root / BRINGUP_CONFIG_SUBDIR
     if args.maps_dir is None:
         args.maps_dir = args.repo_root / MAPS_SUBDIR
+
+# =========================================================================
+#                          DDS CONFIG
+# =========================================================================
+def resolve_dds_dir(args: argparse.Namespace) -> None:
+    """
+    Fill --dds-dir for the requested mode when not given: the repo checkout's
+    dds/<mode subdir> if it holds a cyclonedds.xml, else the installed one.
+    """
+    if args.dds_dir is not None:
+        return
+
+    mode_subdir = DDS_MODE_SUBDIRS[args.mode]
+    repo_dds_dir = REPO_DDS_SOURCE_DIR / mode_subdir
+    if (repo_dds_dir / "cyclonedds.xml").is_file():
+        args.dds_dir = repo_dds_dir
+    else:
+        args.dds_dir = INSTALLED_DDS_SOURCE_DIR / mode_subdir
 
 
 # =========================================================================
@@ -118,9 +146,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--dds-dir",
         type=Path,
-        default=DEFAULT_DDS_SOURCE_DIR,
+        default=None,
         metavar="DIR",
-        help=f"Directory containing DDS files (default: {DEFAULT_DDS_SOURCE_DIR})",
+        help=(
+            f"Directory containing DDS files (default: {REPO_DDS_SOURCE_DIR}/<mode> if present, "
+            f"else {INSTALLED_DDS_SOURCE_DIR}<mode>; deploy -> dds/, sim -> dds/sim/)"
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -145,6 +176,7 @@ def main() -> int:
     try:
         if args.action == "up":
             resolve_repo_paths(args)
+            resolve_dds_dir(args)
             compose_up(
                 mode=args.mode,
                 repo_root=args.repo_root,
