@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import grp
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -14,9 +16,10 @@ class EnvGroups:
     bringup: dict[str, str]
     devices: dict[str, str]
     compose: dict[str, str]
+    sim: dict[str, str]
 
     def merged(self) -> dict[str, str]:
-        return {**self.bringup, **self.devices, **self.compose}
+        return {**self.bringup, **self.devices, **self.compose, **self.sim}
 
 
 # =========================================================================
@@ -25,7 +28,7 @@ class EnvGroups:
 def compose_env_vars(
     bringup_config_dir: Path, maps_dir: Path, dds_dir: Path, settings: dict,
     devices_data: dict,
-    bringup_config_install_dir: Path, maps_install_dir: Path, dds_install_dir: Path,
+    bringup_config_install_dir: Path, maps_install_dir: Path, dds_install_dir: Path, mode: str, 
     repo_root: Path | None = None,
 ) -> EnvGroups:
 
@@ -47,12 +50,15 @@ def compose_env_vars(
         "DDS_SOURCE_DIR": str(dds_dir),
         "DDS_INSTALL_DIR": str(dds_install_dir),
     }
-
+    
     # Main repo, used by compose build.additional_contexts (micipsa: ${MICIPSA_REPO_ROOT})
     if repo_root is not None:
         compose_env["MICIPSA_REPO_ROOT"] = str(repo_root)
 
-    return EnvGroups(bringup=bringup_env, devices=devices_env, compose=compose_env)
+    sim_env = build_sim_env_vars() if mode == "sim" else {}
+
+    return EnvGroups(bringup=bringup_env, devices=devices_env, compose=compose_env, sim=sim_env)
+
 
 # =========================================================================
 #                           HELPERS
@@ -113,3 +119,22 @@ def build_devices_env_vars(devices_data: dict) -> dict[str, str]:
                 flatten_device_params(f"{prefix}_{param_key.upper()}", param_value, env)
 
     return env
+
+def build_sim_env_vars() -> dict[str, str]:
+    display = os.environ.get("DISPLAY")
+    if not display:
+        raise RuntimeError("DISPLAY is not set: run the sim from a graphical session (not via sudo/systemd)")
+    return {
+        "DISPLAY": display,
+        "VIDEO_GID": host_device_gid("card*", "video"),
+        "RENDER_GID": host_device_gid("renderD*", "render"),
+    }
+
+def host_device_gid(device_glob: str, group_name: str) -> str:
+    """GID owning the matching /dev/dri device on this host; falls back to the group name."""
+    for dev in sorted(Path("/dev/dri").glob(device_glob)):
+        return str(os.stat(dev).st_gid)
+    try:
+        return str(grp.getgrnam(group_name).gr_gid)
+    except KeyError:
+        raise RuntimeError(f"No /dev/dri/{device_glob} and no '{group_name}' group on this host")

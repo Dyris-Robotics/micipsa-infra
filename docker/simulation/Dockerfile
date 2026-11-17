@@ -43,6 +43,11 @@ RUN . /opt/ros/${ROS_DISTRO}/setup.sh && \
     ros-${ROS_DISTRO}-diff-drive-controller \
     && rm -rf /var/lib/apt/lists/*
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 libegl1 libgl1-mesa-dri libglx-mesa0 mesa-utils \
+    libxcb-xinerama0 libxkbcommon-x11-0 libxcb-cursor0 \
+    && rm -rf /var/lib/apt/lists/*
+
 # =============================================================================
 #                               BUILD Stage
 #
